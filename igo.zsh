@@ -1,5 +1,7 @@
 #!/bin/zsh
 
+eval $(go env)
+
 command=('go')
 targets=()
 
@@ -91,11 +93,45 @@ run-tests() {
   fi
 }
 
+get-target-files() {
+  local line dir file
+  local -a lines files toks
+
+  files=()
+  lines=( ${(o)${(f)"$(go build -a -n "${@}" 2>&1 | \
+      egrep "^${GOTOOLDIR}/compile" | egrep -v -- "-D _${GOROOT}/src/")"}} )
+
+  for line in "${lines[@]}"; do
+    dir=''
+    toks=( ${(s: :)line} )
+
+    for t in {1..$#toks}; do
+      case "${toks[${t}]}" in
+        '-D')
+          dir="${toks[${t}+1]}"
+          dir="${dir[2,$#dir]}"
+          if [[ "${dir[1,$#PWD]}" == "${PWD}" ]]; then
+            dir=".${dir[$#PWD+1,$#dir]}"
+          fi
+        ;;  
+        ./*.go)
+          file="${toks[${t}]}"
+          file="${file[3,$#file]}"
+          files+=( "${dir}/${file}" )
+        ;;  
+      esac
+    done
+  done
+
+  builtin echo "${files[@]}"
+}
+
 wait-for-changes() {
   echo -en "\n"
   echo -blue "${targets[@]}"
   echo -blue -e "Waiting for further changes.... "
-  files=( $( go vet -n "${targets[@]}" | sed -re 's/^[^ ]* //' ) )
+  files=( $(get-target-files "${targets[@]}") )
+  echo -grey "Watching: ${(D)files[@]}"
   inotifywait -qq -e 'close_write' "${files[@]}"
   echo -blue "Changes detected."
   echo -blue -e "${(l:78::-:):-}\n\n\n"
