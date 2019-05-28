@@ -1,5 +1,11 @@
 #!/bin/zsh
 
+zmodload zsh/datetime
+zmodload -F zsh/stat b:zstat
+
+fpath+=( "$HOME/.zsh/plugins/COMPILED-${ZSH_VERSION}.zwc" )
+autoload -Uz prjdirsinit; prjdirsinit
+
 eval $(go env)
 
 me="$(basename $0)"
@@ -117,7 +123,7 @@ colorize() {
 # A wrapper around the builtin echo that allows for colorization and
 # prepends a timestamp prefix.
 echo() {
-  local pfx="${colormap[-grey]}[$(current-time)]${colormap[_OFF_]} "
+  local pfx="${colormap[-grey]}$(current-time)]${colormap[_OFF_]} "
   local color=''
 
   if [[ -n "${colormap[$1]}" ]]; then
@@ -141,11 +147,16 @@ echo() {
 }
 
 current-time() {
-  local t
-  local IFS='|'
-  t=( $( date +'%m/%d|%H:%M:%S|%N' ) )
-  t[3]=$(( t[3] / 1000000 ))
-  printf '%s-%s.%03d' ${t[@]}
+  local -F v=${EPOCHREALTIME}
+  local -i ms s=${v}
+
+  ms=$(( 1000 * (v - s) + 0.5 ))
+  strftime "I%m%d %H:%M:%S.$(printf '%03d' ${ms})" ${s}
+  # local t
+  # local IFS='|'
+  # t=( $( date +'%m/%d|%H:%M:%S|%N' ) )
+  # t[3]=$(( t[3] / 1000000 ))
+  # printf '%s-%s.%03d' ${t[@]}
 }
 
 colorize-output() {
@@ -185,6 +196,8 @@ colorize-output() {
 }
 
 #####  -----------------------  ##############################################
+
+is-mod-pkg() { go list -m > /dev/null 2>&1 }
 
 run-go-command() {
   echo "Executing: ${command[@]}"
@@ -246,7 +259,7 @@ get-watch-files() {
 
 # Prints all non-dependent target filenames
 get-target-files() {
-  local -a files=( $( print "${1}" | jq -r 'select(.dep == 0) | .file') )
+  local -a files=( $( print "${1}" | jq -r 'select(.dep == 0) | .file' | egrep -v '/.cache/go-build/' | sort | uniq) )
   print "${(D)files[@]}"
 }
 
@@ -291,38 +304,92 @@ indent-extra() {
   local i="${1}"
   local spaces="${(l:${i}:: :): }"
 
-  sed -r "2,\$s/^/${spaces}/"
+  sed -r "2,\$s/^/${spaces}/" | sed -re 's/ *$//'
 }
 
-wait-for-changes() {
-  local -i i=31
-  local -i w=$(( COLUMNS - i ))
-
-  echo -e "\n"
-  echo -blue "Targets:  $(COLUMNS="${w}" print -ac ${targets[@]} | indent-extra ${i} )"
-
-  echo -blue -n "Calculating watch list... "
-
-  local watchJS="$(get-watch-json)"
-  # local -a files=( print "${watchJS}" | jq -r '.file' | egrep -v '/.cache/go-build/' | sort | uniq )
-  local -a files=(    $(get-watch-files "${watchJS}")  )
-  local -a tgtFiles=( $(get-target-files "${watchJS}") )
-  local -a depPkgs=(  $(get-dep-packages "${watchJS}") )
-
-  echo -ne "\r${clr_eol}"
-
-  echo -pale "Watching: $(COLUMNS="${w}" print -ac ${tgtFiles[@]} | indent-extra ${i} )"
-  if [[ ${#depPkgs} -gt 0 ]]; then
-    echo -pale -e "   +Pkgs: $(COLUMNS="${w}" print -ac ${depPkgs[@]} | indent-extra ${i} )\n"
-  fi
-
+wait-for-files() {
   echo -blue -ne "Waiting for further changes.... "
-  inotifywait -qq -e 'close_write' "${files[@]}"
+  inotifywait -qq -e 'close_write' "${@}"
   echo -ne "\r${clr_eol}"
 
   echo -blue -e "Changes detected."
   echo -blue -e "${(l:78::-:):-}\n\n\n"
 }
+
+if is-mod-pkg; then
+  wait-for-changes() {
+    local -i i=30
+    local -i w=$(( COLUMNS - i ))
+
+    local -a packages=(
+      $(
+        go list -e      \
+          -json         \
+          -compiled     \
+          -export=false \
+          -deps=true    \
+          -find=false   \
+          "${targets[@]}" | jq -r '
+            .Module
+            | select(
+              .Main or .Replace != null and (.Replace.Path | startswith("/"))
+            )
+            | {Path} | .[] ' | sort | uniq)
+    )
+
+    echo -e "\n"
+    echo -blue "Targets:  $(COLUMNS="${w}" print -ac ${targets[@]}  | indent-extra ${i} )"
+    echo -blue "Packages: $(COLUMNS="${w}" print -ac ${packages[@]} | indent-extra ${i} )"
+
+    echo -blue -n "Calculating watch list... "
+
+    local pkgs="${(j:, :)${(qqq)packages[@]}}"
+
+    local -a files=(
+      $(go list -e -json -compiled -export=false -deps=true -find=false | jq -r "
+        select(.Module.Path as \$path
+          | [${pkgs}]
+          | map(. == \$path)
+          | any
+        )
+        | .Dir as \$dir
+        | .GoFiles
+        | .[]
+        | \"\(\$dir)/\(.)\"")
+    )
+
+    echo -ne "\r${clr_eol}"
+
+    echo -pale "Watching: $(COLUMNS="${w}" print -ac ${(D)files[@]} | indent-extra ${i} )"
+
+    wait-for-files "${files[@]}"
+  }
+else
+  wait-for-changes() {
+    local -i i=30
+    local -i w=$(( COLUMNS - i ))
+
+    echo -e "\n"
+    echo -blue "Targets:  $(COLUMNS="${w}" print -ac ${targets[@]} | indent-extra ${i} )"
+
+    echo -blue -n "Calculating watch list... "
+
+    local watchJS="$(get-watch-json)"
+    # local -a files=( print "${watchJS}" | jq -r '.file' | egrep -v '/.cache/go-build/' | sort | uniq )
+    local -a files=(    $(get-watch-files "${watchJS}")  )
+    local -a tgtFiles=( $(get-target-files "${watchJS}") )
+    local -a depPkgs=(  $(get-dep-packages "${watchJS}") )
+
+    echo -ne "\r${clr_eol}"
+
+    echo -pale "Watching: $(COLUMNS="${w}" print -ac ${tgtFiles[@]} | indent-extra ${i} )"
+    if [[ ${#depPkgs} -gt 0 ]]; then
+      echo -pale -e "   +Pkgs: $(COLUMNS="${w}" print -ac ${depPkgs[@]} | indent-extra ${i} )\n"
+    fi
+
+    wait-for-files "${files[@]}"
+  }
+fi
 
 #####  -----------------------  ##############################################
 
