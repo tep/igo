@@ -307,6 +307,17 @@ indent-extra() {
   sed -r "2,\$s/^/${spaces}/" | sed -re 's/ *$//'
 }
 
+columnize-watchlist() {
+  local -a files=( $@ )
+
+  local -a shortnd=( ${(oD)files[@]} )
+  local -a combind=( ${(oD)$(realpath --relative-base=${PWD} ${files[@]})} )
+
+  print -c $(comm -23 =(print ${(F)combind[@]}) =(print ${(F)shortnd[@]}))
+  print
+  print -c $(comm -12 =(print ${(F)combind[@]}) =(print ${(F)shortnd[@]}))
+}
+
 wait-for-files() {
   echo -blue -ne "Waiting for further changes.... "
   inotifywait -qq -e 'close_write' "${@}"
@@ -321,7 +332,7 @@ if is-mod-pkg; then
     local -i i=30
     local -i w=$(( COLUMNS - i ))
 
-    local -a packages=(
+    local -a modules=(
       $(
         go list -e      \
           -json         \
@@ -338,12 +349,12 @@ if is-mod-pkg; then
     )
 
     echo -e "\n"
-    echo -blue "Targets:  $(COLUMNS="${w}" print -ac ${targets[@]}  | indent-extra ${i} )"
-    echo -blue "Packages: $(COLUMNS="${w}" print -ac ${packages[@]} | indent-extra ${i} )"
+    echo -blue "Targets: $(COLUMNS="${w}" print -ac ${targets[@]} | indent-extra ${i} )"
+    echo -blue "Modules: $(COLUMNS="${w}" print -ac ${modules[@]} | indent-extra ${i} )"
 
     echo -blue -n "Calculating watch list... "
 
-    local pkgs="${(j:, :)${(qqq)packages[@]}}"
+    local mods="${(j:, :)${(qqq)modules[@]}}"
 
     local -a args=( '-e' '-json' '-compiled' '-export=false' '-deps=true' '-find=false' )
 
@@ -354,7 +365,7 @@ if is-mod-pkg; then
     local -a files=(
       $(go list "${args[@]}" | jq -r "
         select(.Module.Path as \$path
-          | [${pkgs}]
+          | [${mods}]
           | map(. == \$path)
           | any
         )
@@ -366,7 +377,8 @@ if is-mod-pkg; then
 
     echo -ne "\r${clr_eol}"
 
-    echo -pale "Watching: $(COLUMNS="${w}" print -ac ${(D)files[@]} | indent-extra ${i} )"
+    echo -pale "Watching: $(COLUMNS="${w}" columnize-watchlist ${files[@]} | indent-extra ${i} )"
+    print
 
     wait-for-files "${files[@]}"
   }
