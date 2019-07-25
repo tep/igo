@@ -345,8 +345,14 @@ if is-mod-pkg; then
 
     local pkgs="${(j:, :)${(qqq)packages[@]}}"
 
+    local -a args=( '-e' '-json' '-compiled' '-export=false' '-deps=true' '-find=false' )
+
+    if [[ -n "${testing}" ]]; then
+      args+=( '-test=true' )
+    fi
+
     local -a files=(
-      $(go list -e -json -compiled -export=false -deps=true -find=false | jq -r "
+      $(go list "${args[@]}" | jq -r "
         select(.Module.Path as \$path
           | [${pkgs}]
           | map(. == \$path)
