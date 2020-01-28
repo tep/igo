@@ -62,21 +62,26 @@ case "${1}" in
     ;;
 esac
 
+no_watch=()
+
 # TODO: Add option to exec (and restart) a process when a binary gets rebuilt.
 #       This will require careful job control and proper signal handling.
 while [[ $# -gt 0 ]]; do
   case "${1}" in
+    --no-watch)
+      no_watch+=( "${2}" )
+      shift
+      ;;
     -*)
       [[ "${#targets[@]}" -eq 0 ]] || die "Invalid target: \"${1}\""
       command+=("${1}")
-      shift
       ;;
 
     *)
       targets+=("${1}")
-      shift
       ;;
   esac
+  shift
 done
 
 if [[ "${#targets[@]}" -ne 0 ]]; then
@@ -98,9 +103,9 @@ clr_eol="$(echoti el)"
 
 typeset -A colormap
 colormap=(
-  -pale   "$( echoti setaf  23 )"
   -green  "$( echoti setaf  34 )"
   -blue   "$( echoti setaf  69 )"
+  -pale   "$( echoti setaf 102 )"
   -tan    "$( echoti setaf 144 )"
   -yellow "$( echoti setaf 148 )"
   -red    "$( echoti setaf 160 )"
@@ -318,6 +323,10 @@ columnize-watchlist() {
   print -c $(comm -12 =(print ${(F)combind[@]}) =(print ${(F)shortnd[@]}))
 }
 
+exclude-no-watch() {
+  comm -23 - =(print ${(F)${(o)no_watch[@]}})
+}
+
 wait-for-files() {
   echo -blue -ne "Waiting for further changes.... "
   inotifywait -qq -e 'close_write' "${@}"
@@ -345,7 +354,7 @@ if is-mod-pkg; then
             | select(
               .Main or .Replace != null and (.Replace.Path | startswith("/"))
             )
-            | {Path} | .[] ' | sort | uniq)
+            | {Path} | .[] ' | sort | uniq | exclude-no-watch)
     )
 
     echo -e "\n"
