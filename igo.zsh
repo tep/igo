@@ -371,7 +371,7 @@ if is-mod-pkg; then
       args+=( '-test=true' )
     fi
 
-    local -a files=(
+    local -Ua files=(
       $(go list "${args[@]}" | jq -r "
         select(.Module.Path as \$path
           | [${mods}]
@@ -403,9 +403,9 @@ else
 
     local watchJS="$(get-watch-json)"
     # local -a files=( print "${watchJS}" | jq -r '.file' | egrep -v '/.cache/go-build/' | sort | uniq )
-    local -a files=(    $(get-watch-files "${watchJS}")  )
-    local -a tgtFiles=( $(get-target-files "${watchJS}") )
-    local -a depPkgs=(  $(get-dep-packages "${watchJS}") )
+    local -Ua files=(    $(get-watch-files "${watchJS}")  )
+    local -Ua tgtFiles=( $(get-target-files "${watchJS}") )
+    local -Ua depPkgs=(  $(get-dep-packages "${watchJS}") )
 
     echo -ne "\r${clr_eol}"
 
